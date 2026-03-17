@@ -785,7 +785,7 @@ window._renderTableOnly = function () {
                         const label  = config.label || h;
                         return `<th class="px-3 py-3 text-uppercase text-secondary fw-bold" style="width:${config.width}; font-size:0.7rem; letter-spacing:0.05em;">${label}</th>`;
                     }).join('')}
-                    <th class="text-end px-3 bg-light sticky-end" style="width:180px; position:sticky; right:0; z-index:10; border-left: 1px solid #e2e8f0;">ACTION</th>
+                    <th class="text-end px-3 bg-light sticky-end" style="width:180px; position:sticky; right:0; z-index:10; border-left: 1px solid #e2e8f0;">Load Here</th>
                 </tr>
             </thead>
             <tbody style="border-top: 0;">
