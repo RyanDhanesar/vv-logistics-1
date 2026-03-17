@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V&V Logistics | Load Command</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <style>
+        @media print {
+            /* Hide everything except the printable area */
+            body * { visibility: hidden; }
+            #printableArea, #printableArea * { visibility: visible; }
+            #printableArea {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .no-print { display: none !important; }
+        }
+
+        :root { 
+            --vv-slate: #334155; 
+            --vv-accent: #3b82f6;
+            --vv-border: #e2e8f0;
+            --vv-bg: #f8fafc;
+        }
+        
+        body { background-color: var(--vv-bg); font-family: 'Segoe UI', system-ui, sans-serif; }
+        
+        .navbar { background-color: white !important; border-bottom: 1px solid var(--vv-border); padding: 0.6rem 1rem; }
+        .navbar-brand { font-size: 1rem; color: var(--vv-slate) !important; font-weight: 700; letter-spacing: -0.5px; }
+        
+        .nav-link { 
+            color: #64748b; 
+            font-weight: 600; 
+            font-size: 0.8rem; 
+            padding: 8px 16px !important;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            border-radius: 6px;
+            border: none !important;
+            background: transparent;
+        }
+        .nav-link i { font-size: 1.1rem; }
+        .nav-link:hover { color: var(--vv-accent); background: #eff6ff; }
+        .nav-link.active { color: var(--vv-accent) !important; background: #eff6ff; }
+
+        .action-card { 
+            border: 1px solid var(--vv-border); 
+            border-radius: 12px; 
+            background: #fff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            height: 100%;
+        }
+        .action-card:hover { 
+            border-color: var(--vv-accent); 
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.05);
+        }
+        .card-icon {
+            width: 54px;
+            height: 54px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .icon-import { background: #fff7ed; color: #ea580c; }
+        .icon-master { background: #eff6ff; color: #2563eb; }
+        .icon-dispatch { background: #f0fdf4; color: #16a34a; }
+        .icon-history { background: #f1f5f9; color: #475569; }
+
+        .sticky-top { top: 0; z-index: 1021 !important; }
+        .section-container { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .btn-tray-nav {
+            background: var(--vv-slate);
+            color: white;
+            border: none;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: transform 0.1s;
+        }
+
+        /* Status Badge Colors */
+        .badge-pending { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; } /* Slate Grey */
+        .badge-staged { background-color: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; }  /* Blue */
+        .badge-verified { background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; } /* Green */
+        .badge-manifested { background-color: #faf5ff; color: #a855f7; border: 1px solid #e9d5ff; } /* Purple */
+        .btn-tray-nav:hover { background: #1e293b; color: white; }
+        .btn-tray-nav:active { transform: scale(0.95); }
+        .bg-purple-subtle { background-color: #f3e8ff !important; }
+        .text-purple { color: #7e22ce !important; }
+        .border-purple-subtle { border-color: #e9d5ff !important; }
+
+        /* Add this to your existing module colors */
+        .icon-manifest { background: #f0fdf4; color: #16a34a; } /* A clean "Success" green */
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body class="d-flex flex-column min-vh-100">
+
+    <nav class="navbar navbar-expand-lg sticky-top shadow-sm">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand d-flex align-items-center" href="#" onclick="showSection('mainMenu')">
+                <i class="bi bi-box-seam-fill me-2 text-primary"></i> V&V COMMAND
+            </a>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav mx-auto gap-1">
+                    <li class="nav-item"><button class="nav-link active" onclick="showSection('importPane')"><i class="bi bi-file-earmark-arrow-up"></i> Import Orders</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="showSection('masterPane')"><i class="bi bi-stack"></i> Create Load Sheet</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="showSection('dispatchPane')"><i class="bi bi-truck"></i> Load sheets</button></li>
+                    <li class="nav-item"><button class="nav-link" id="btn-manifestPane" onclick="showSection('manifestPane')"><i class="bi bi-file-earmark-check"></i> Manifests</button></li>
+                    <li class="nav-item"><button class="nav-link" onclick="showSection('historyPane')"><i class="bi bi-collection"></i> History</button></li>
+                </ul>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-tray-nav d-flex align-items-center gap-2 shadow-sm" data-bs-toggle="offcanvas" data-bs-target="#loadTrayDrawer">
+                    <i class="bi bi-pencil-square text-info"></i> 
+                    DRAFTED ITEMS
+                    <span class="badge bg-info text-dark" id="trayCountBadge">0</span>
+                </button>
+
+                <button class="btn btn-sm btn-light border fw-bold text-secondary px-3" onclick="openZoneManager()">
+                    <i class="bi bi-gear-fill"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container-fluid mt-5 flex-grow-1 px-md-5">
+        
+        <div id="mainMenu" class="section-container">
+            <div class="mb-5">
+                <h4 class="fw-bold text-slate">Logistics Operations</h4>
+                <p class="text-muted small">Select a tool to manage your orders and load sheets.</p>
+            </div>
+            <div class="row g-4">
+                <div class="col-md-3">
+                    <div class="card action-card p-4" onclick="showSection('importPane')">
+                        <div class="card-icon icon-import"><i class="bi bi-file-earmark-arrow-up"></i></div>
+                        <h6 class="fw-bold">Import Order Sheet</h6>
+                        <p class="text-muted small mb-0">Upload factory spreadsheets to update pending stock.</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card action-card p-4" onclick="showSection('masterPane')">
+                        <div class="card-icon icon-master"><i class="bi bi-stack"></i></div>
+                        <h6 class="fw-bold">Create Load Sheet</h6>
+                        <p class="text-muted small mb-0">Allocate available units to specific truck routes.</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card action-card p-4" onclick="showSection('dispatchPane')">
+                        <div class="card-icon icon-dispatch"><i class="bi bi-truck"></i></div>
+                        <h6 class="fw-bold">Manage Load Sheets</h6>
+                        <p class="text-muted small mb-0">Finalize, print, and track active load sheets.</p>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card action-card p-4" onclick="showSection('manifestPane')">
+                        <div class="card-icon icon-manifest"><i class="bi bi-file-earmark-check"></i></div>
+                        <h6 class="fw-bold">Manage Manifests</h6>
+                        <p class="text-muted small mb-0">Review and finalize dispatch manifests.</p>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card action-card p-4" onclick="showSection('historyPane')">
+                        <div class="card-icon icon-history"><i class="bi bi-collection"></i></div>
+                        <h6 class="fw-bold">History Archive</h6>
+                        <p class="text-muted small mb-0">Review previously finalized and completed loads.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="importPane" class="section-container d-none">
+            <div id="progressBarContainer" class="container mb-4 d-none">
+                <div class="progress" style="height: 10px; border-radius: 20px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="row justify-content-center" id="uploadLayoutRow">
+                <div class="col-lg-6" id="uploadColumn">
+                    <div class="card border-0 shadow-sm p-4 text-center">
+                        <h5 class="fw-bold mb-4">Import Order Sheet</h5>
+                        <form id="uploadForm">
+                            <div class="upload-area mb-4" id="dropZone" style="cursor: pointer; border: 2px dashed #cbd5e0; padding: 80px; border-radius: 12px; background: #fafafa;">
+                                <i class="bi bi-cloud-arrow-up text-muted display-4"></i>
+                                <p class="mt-3 fw-bold small" id="fileNameDisplay">Click or drag Excel file to begin</p>
+                                <input type="file" name="file" id="fileInput" hidden accept=".xlsx, .xls">
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 py-3 fw-bold shadow-sm">UPLOAD AND PROCESS DATA</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="col-12 d-none mt-4" id="resultColumn">
+                    <div class="d-flex justify-content-end mb-3">
+                        <button class="btn btn-sm btn-outline-secondary fw-bold" onclick="location.reload()">
+                            <i class="bi bi-arrow-left me-1"></i> UPLOAD DIFFERENT FILE
+                        </button>
+                    </div>
+                    <div id="summaryTable"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- masterPane: NO search input here — it is injected by _buildOrGetNavShell in script.js -->
+        <div id="masterPane" class="section-container d-none">
+            <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 12px;">
+                <div class="card-body p-0">
+                    <div id="masterTableContainer"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="dispatchPane" class="section-container d-none">
+            <h5 class="fw-bold mb-4"><i class="bi bi-truck me-2 text-success"></i>Active Load Sheets</h5>
+            <div id="dispatchTableContainer"></div>
+        </div>
+
+        <div id="manifestPane" class="section-container d-none">
+            <h5 class="fw-bold mb-4"><i class="bi bi-file-earmark-check me-2 text-success"></i>Official Manifests</h5>
+            <div id="manifestTableContainer"></div>
+        </div>
+
+        <div id="historyPane" class="section-container d-none">
+            <h5 class="fw-bold mb-4"><i class="bi bi-collection me-2 text-secondary"></i>History Archive</h5>
+            <div id="historyTableContainer"></div>
+        </div>
+
+    </main>
+
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="loadTrayDrawer" style="width: 450px;">
+        <div class="offcanvas-header border-bottom">
+            <h6 class="offcanvas-title fw-bold">DRAFT LOAD SHEET</h6>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body p-0" id="loadTrayContent"></div>
+    </div>
+
+    <footer class="bg-white border-top py-3 mt-auto shadow-sm">
+        <div class="container-fluid px-5 d-flex justify-content-between align-items-center">
+            <div class="small text-muted fw-bold">
+                SYSTEM STATUS: <span class="text-success">● OPERATIONAL</span>
+            </div>
+            <div id="sessionCount" class="small text-muted fw-bold uppercase"></div>
+        </div>
+    </footer>
+
+    <script>
+        function showSection(sectionId) {
+            document.querySelectorAll('.section-container').forEach(el => el.classList.add('d-none'));
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+            
+            const target = document.getElementById(sectionId);
+            if(target) target.classList.remove('d-none');
+            
+            const links = document.querySelectorAll('.nav-link');
+            links.forEach(link => {
+                if(link.getAttribute('onclick').includes(sectionId)) link.classList.add('active');
+            });
+
+            if(sectionId === 'masterPane' && typeof renderMasterTable === 'function') renderMasterTable();
+            if(sectionId === 'dispatchPane' && typeof renderDispatchTable === 'function') renderDispatchTable();
+            if(sectionId === 'manifestPane' && typeof renderManifestTable === 'function') renderManifestTable();
+            if(sectionId === 'historyPane' && typeof renderHistoryTable === 'function') {
+                window.recalledTripID = null; // Reset view when clicking tab
+                renderHistoryTable();
+            }
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script src="js/scripts.js"></script>
+    <script src="js/dispatch.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/manifest.js"></script>
+    
+</body>
+</html>

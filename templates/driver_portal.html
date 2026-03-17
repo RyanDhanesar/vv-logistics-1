@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Portal | V&V Logistics</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        .smallest { font-size: 0.7rem; }
+        .card-trip { border-left: 5px solid #0d6efd; transition: transform 0.2s; }
+        .card-trip:active { transform: scale(0.98); }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-primary shadow-sm sticky-top">
+        <div class="container-fluid">
+            <span class="navbar-brand fw-bold"><i class="bi bi-truck me-2"></i>DRIVER TERMINAL</span>
+            <button class="btn btn-sm btn-outline-light" onclick="renderDriverTrips()"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+    </nav>
+
+    <div class="container mt-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="text-muted text-uppercase fw-bold smallest mb-0">Active Manifests</h6>
+            <span id="lastUpdated" class="text-muted smallest"></span>
+        </div>
+        
+        <div id="activeTripsContainer"></div>
+    </div>
+
+    <!-- Manifest Detail Modal -->
+    <div class="modal fade" id="manifestModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white py-2">
+                    <h6 class="modal-title fw-bold text-uppercase smallest mb-0" id="manifestModalTitle">Manifest</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0" id="manifestModalBody"></div>
+                <div class="modal-footer py-2">
+                    <button class="btn btn-sm btn-dark fw-bold" onclick="printManifest()">
+                        <i class="bi bi-printer me-1"></i> Print
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+
+        // Trip currently open in the modal (used by printManifest)
+        let _currentManifest = null;
+
+        // ─────────────────────────────────────────────────────────────
+        // MAIN RENDER
+        //
+        // WHY 'dispatchedTrips' and not 'masterOrders':
+        //   dispatch.js calls `delete item.TripID` on every LOADED item
+        //   so that completed trips disappear from the dispatch selector.
+        //   That means filtering masterOrders for Status==='LOADED' && TripID
+        //   always returns zero — the portal would always show "no loads".
+        //
+        //   The fix: dispatch.js now writes a snapshot to 'dispatchedTrips'
+        //   BEFORE deleting TripID. This portal reads that instead.
+        // ─────────────────────────────────────────────────────────────
+
+        function renderDriverTrips() {
+            try {
+                const rawData = localStorage.getItem('dispatchedTrips');
+                const container = document.getElementById('activeTripsContainer');
+
+                if (!rawData) { showNoData(); return; }
+
+                const trips = JSON.parse(rawData);
+
+                if (!trips || trips.length === 0) { showNoData(); return; }
+
+                container.innerHTML = trips.map(trip => {
+                    const shortBadge = trip.shortCount > 0
+                        ? `<span class="badge bg-warning text-dark smallest ms-1">
+                               <i class="bi bi-exclamation-triangle-fill"></i> ${trip.shortCount} SHORT
+                           </span>`
+                        : '';
+
+                    return `
+                    <div class="card shadow-sm mb-3 border-0 card-trip">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <span class="badge bg-primary-subtle text-primary smallest fw-bold text-uppercase mb-1">
+                                        ${trip.zone}
+                                    </span>
+                                    ${shortBadge}
+                                    <h5 class="fw-bold mb-0">${trip.id}</h5>
+                                    <div class="mt-1">
+                                        <i class="bi bi-box-seam text-muted small"></i>
+                                        <small class="text-muted">
+                                            Total Units: <strong>${trip.totalLoaded}</strong>
+                                            &nbsp;·&nbsp; Lines: <strong>${trip.items.length}</strong>
+                                        </small>
+                                    </div>
+                                    <div class="smallest text-muted mt-1">
+                                        <i class="bi bi-clock me-1"></i>${trip.dispatchedAt}
+                                    </div>
+                                </div>
+                                <button class="btn btn-dark fw-bold" onclick="viewManifest('${trip.id}')">
+                                    <i class="bi bi-file-earmark-text me-1"></i> VIEW
+                                </button>
+                            </div>
+                            <hr class="my-3 opacity-10">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <button class="btn btn-light border w-100 btn-sm text-muted" disabled>
+                                        <i class="bi bi-fuel-pump smallest d-block"></i> FUEL
+                                    </button>
+                                </div>
+                                <div class="col-6">
+                                    <button class="btn btn-light border w-100 btn-sm text-muted" disabled>
+                                        <i class="bi bi-speedometer2 smallest d-block"></i> ODO
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                document.getElementById('lastUpdated').innerText = "Updated: " + new Date().toLocaleTimeString();
+
+            } catch (error) {
+                console.error("Portal Error:", error);
+                document.getElementById('activeTripsContainer').innerHTML =
+                    '<div class="alert alert-danger">System Error: Could not read manifest data.</div>';
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // MANIFEST DETAIL — shows description, planned vs loaded per area
+        // ─────────────────────────────────────────────────────────────
+
+        function viewManifest(tripId) {
+            const trips = JSON.parse(localStorage.getItem('dispatchedTrips') || '[]');
+            const trip = trips.find(t => t.id === tripId);
+            if (!trip) return alert("Could not load manifest. Please refresh.");
+
+            _currentManifest = trip;
+            document.getElementById('manifestModalTitle').textContent =
+                `Manifest — ${trip.id} (${trip.zone})`;
+
+            // Group by Area for driver readability
+            const areaMap = {};
+            trip.items.forEach(item => {
+                const area = item.Area || 'UNKNOWN';
+                if (!areaMap[area]) areaMap[area] = [];
+                areaMap[area].push(item);
+            });
+
+            const tableRows = Object.entries(areaMap).map(([area, items]) => {
+                const areaTotal = items.reduce((s, o) => s + (o.Final_Loaded || 0), 0);
+
+                const itemRows = items.map(item => {
+                    const isShort = item.Note && item.Note.includes('SHORT');
+                    const isOver  = item.Note && item.Note.includes('OVER');
+                    return `
+                    <tr class="${isShort ? 'table-warning' : ''}">
+                        <td class="px-3 py-2" style="font-size:0.82rem; white-space:normal; word-break:break-word;">
+                            ${item.description || '<span class="text-muted fst-italic">No description</span>'}
+                        </td>
+                        <td class="text-center px-3 py-2 text-muted" style="font-size:0.82rem;">${item.planned}</td>
+                        <td class="text-center px-3 py-2 fw-bold" style="font-size:0.82rem;">
+                            <span class="${isShort ? 'text-warning' : isOver ? 'text-primary' : 'text-success'}">
+                                ${item.Final_Loaded}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2" style="font-size:0.75rem; color:#888; font-style:italic;">
+                            ${item.Note && item.Note !== 'Fully Dispatched' ? item.Note : ''}
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                return `
+                <tr class="table-primary">
+                    <td colspan="4" class="px-3 py-2 fw-bold text-uppercase" style="font-size:0.75rem; letter-spacing:0.05em;">
+                        <i class="bi bi-geo-alt-fill me-1"></i>${area}
+                        <span class="fw-normal text-muted ms-2">${areaTotal} units</span>
+                    </td>
+                </tr>
+                ${itemRows}`;
+            }).join('');
+
+            document.getElementById('manifestModalBody').innerHTML = `
+                <div class="px-3 py-2 bg-light border-bottom d-flex gap-3 flex-wrap smallest text-muted">
+                    <span><i class="bi bi-calendar3 me-1"></i>${trip.dispatchedAt}</span>
+                    <span><i class="bi bi-box-seam me-1"></i>${trip.totalLoaded} units loaded</span>
+                    ${trip.shortCount > 0
+                        ? `<span class="text-warning fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${trip.shortCount} short line(s)</span>`
+                        : `<span class="text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i>No shorts</span>`}
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="px-3 py-2" style="width:45%; font-size:0.75rem;">DESCRIPTION</th>
+                                <th class="text-center px-3 py-2" style="width:15%; font-size:0.75rem;">PLANNED</th>
+                                <th class="text-center px-3 py-2" style="width:15%; font-size:0.75rem;">LOADED</th>
+                                <th class="px-3 py-2" style="width:25%; font-size:0.75rem;">NOTE</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            `;
+
+            new bootstrap.Modal(document.getElementById('manifestModal')).show();
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // PRINT MANIFEST
+        // ─────────────────────────────────────────────────────────────
+
+        function printManifest() {
+            if (!_currentManifest) return;
+            const t = _currentManifest;
+
+            const areaMap = {};
+            t.items.forEach(item => {
+                const a = item.Area || 'UNKNOWN';
+                if (!areaMap[a]) areaMap[a] = [];
+                areaMap[a].push(item);
+            });
+
+            const rows = Object.entries(areaMap).map(([area, items]) => `
+                <tr>
+                    <td colspan="4" style="background:#e8f0fe; font-weight:700; padding:5px 8px;
+                                          font-size:0.8rem; text-transform:uppercase;">
+                        📍 ${area}
+                    </td>
+                </tr>
+                ${items.map(item => `
+                <tr>
+                    <td style="padding:5px 8px; font-size:0.78rem;">${item.description || '—'}</td>
+                    <td style="padding:5px 8px; text-align:center; font-size:0.78rem;">${item.planned}</td>
+                    <td style="padding:5px 8px; text-align:center; font-size:0.78rem; font-weight:700;">${item.Final_Loaded}</td>
+                    <td style="padding:5px 8px; font-size:0.72rem; color:#666; font-style:italic;">
+                        ${item.Note && item.Note !== 'Fully Dispatched' ? item.Note : ''}
+                    </td>
+                </tr>`).join('')}
+            `).join('');
+
+            const win = window.open('', '_blank');
+            win.document.write(`
+                <!DOCTYPE html><html><head>
+                <title>Manifest — ${t.id}</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
+                    h2 { font-size: 1.1rem; margin: 0 0 4px 0; }
+                    .meta { font-size: 0.75rem; color: #555; margin-bottom: 14px; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th { background: #0a1628; color: #fff; padding: 6px 8px; font-size: 0.72rem;
+                         text-align: left; text-transform: uppercase; }
+                    td { border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+                    .sig { margin-top: 40px; }
+                    .sig-line { display: inline-block; border-top: 1px solid #333; width: 180px;
+                                font-size: 0.65rem; color: #555; padding-top: 4px; }
+                </style>
+                </head><body>
+                <h2>DELIVERY MANIFEST — ${t.id}</h2>
+                <div class="meta">
+                    Zone: <strong>${t.zone}</strong> &nbsp;|&nbsp;
+                    Dispatched: <strong>${t.dispatchedAt}</strong> &nbsp;|&nbsp;
+                    Total Loaded: <strong>${t.totalLoaded} units</strong>
+                </div>
+                <table>
+                    <thead><tr>
+                        <th style="width:45%">Description</th>
+                        <th style="width:15%; text-align:center">Planned</th>
+                        <th style="width:15%; text-align:center">Loaded</th>
+                        <th style="width:25%">Notes</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <div class="sig">
+                    <span class="sig-line">Driver Signature</span>
+                    &nbsp;&nbsp;&nbsp;
+                    <span class="sig-line">Supervisor Signature</span>
+                </div>
+                <script>window.onload = () => window.print();<\/script>
+                </body></html>
+            `);
+            win.document.close();
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // EMPTY STATE
+        // ─────────────────────────────────────────────────────────────
+
+        function showNoData() {
+            document.getElementById('activeTripsContainer').innerHTML = `
+                <div class="text-center p-5 bg-white rounded border shadow-sm">
+                    <i class="bi bi-card-checklist display-1 text-light"></i>
+                    <h6 class="text-muted mt-3">No active loads assigned to you.</h6>
+                    <p class="smallest text-muted">Manifests will appear here once finalized by Dispatch.</p>
+                </div>`;
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // INIT & SYNC
+        // ─────────────────────────────────────────────────────────────
+
+        renderDriverTrips();
+
+        // Instant update when dispatch saves from another tab
+        window.addEventListener('storage', (event) => {
+            if (event.key === 'dispatchedTrips' || event.key === 'masterOrders') {
+                renderDriverTrips();
+            }
+        });
+
+        // Fallback timer
+        setInterval(renderDriverTrips, 60000);
+    </script>
+</body>
+</html>

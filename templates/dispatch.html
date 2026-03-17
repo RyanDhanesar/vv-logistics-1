@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>V&V Dispatch | Verification Terminal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-secondary d-flex flex-column min-vh-100">
+
+    <nav class="navbar navbar-dark bg-dark shadow-sm">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1 px-3">[DISPATCH TERMINAL]</span>
+            <span class="text-warning small fw-bold">LIVE SYNC ACTIVE</span>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4 flex-grow-1">
+        <div class="card border-0 shadow-lg">
+            <div class="card-header bg-white p-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-uppercase small">[LOAD VERIFICATION] Check units against planned load</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="location.reload()">REFRESH LOAD</button>
+                
+            </div>
+            
+            <div class="card-body p-0">
+                <div id="dispatchTableContainer" class="p-3">
+                    </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dispatch.js') }}"></script>
+</body>
+</html>
