@@ -58,7 +58,6 @@ function renderDispatchTable() {
     let html = `
         <div class="mb-4 d-flex align-items-center justify-content-between no-print">
             <div>
-                
                 <p class="text-muted smallest text-uppercase fw-bold mb-0" style="letter-spacing:1px;">Active & Recent Load Sheets</p>
             </div>
             <button class="btn btn-sm btn-light border fw-bold text-secondary px-3" onclick="window.selectedTrip=null; renderDispatchTable();">
@@ -113,6 +112,10 @@ function renderDispatchTable() {
         const progressPct = Math.round((verifiedCount / totalCount) * 100);
         const reasons = ["Truck Full", "Stock Damaged", "Short Picked"];
 
+        // CALCULATE TOTALS FOR RIBBON
+        const totalPlannedUnits = filteredItems.reduce((sum, item) => sum + (parseInt(item.staged_qty) || 0), 0);
+        const totalActualUnits = filteredItems.reduce((sum, item) => sum + (parseInt(item.Final_Loaded ?? item.staged_qty) || 0), 0);
+
         html += `
             <div class="section-container" id="printableArea">
                 <div class="card mb-4 border-0 shadow-sm overflow-hidden" style="border-radius:12px;">
@@ -160,6 +163,14 @@ function renderDispatchTable() {
                             <tbody class="bg-white">
                                 ${filteredItems.map(item => renderDispatchRow(item, reasons, isLocked)).join('')}
                             </tbody>
+                            <tfoot class="bg-light fw-bold">
+                                <tr>
+                                    <td colspan="2" class="ps-4 text-uppercase small">Truck Payload Totals</td>
+                                    <td class="text-center text-dark">${totalPlannedUnits}</td>
+                                    <td class="text-center text-primary">${totalActualUnits}</td>
+                                    <td colspan="3"></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>
@@ -191,6 +202,26 @@ function renderDispatchTable() {
     container.innerHTML = html;
 }
 
+window.removeLineFromTrip = (fingerprint) => {
+    const item = masterOrders.find(o => o.fingerprint === fingerprint);
+    if (!item) return;
+
+    if (confirm(`Remove ${item.Area} from this Load Sheet?`)) {
+        // 1. Put the staged units back into the available remainder
+        item.qty += (item.staged_qty || 0);
+        
+        // 2. Clear the logistics data
+        item.staged_qty = 0;
+        item.Final_Loaded = undefined;
+        item.TripID = null;
+        item.Status = 'Pending';
+
+        localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
+        renderDispatchTable();
+        alert("Units returned to the master pool.");
+    }
+};
+
 window.openLoadSheetForEdit = (lsID) => {
     window.selectedTrip = lsID;
     // We scroll to or reveal the verification table here
@@ -209,33 +240,52 @@ window.sendToDriver = () => {
 
     if (currentTripItems.length === 0) return alert("No items found to manifest.");
 
-    if (!confirm(`Finalize ${window.selectedTrip}? This will lock the load sheet and generate the official manifest.`)) return;
+    if (!confirm(`Finalize ${window.selectedTrip}? This will lock the load sheet and generate the official manifest. Any shortages will be returned to the Master Stock.`)) return;
 
-    // 1. UPDATE STATUS: Change 'VERIFIED' to 'MANIFESTED'
+    // 1. PROCESS ITEMS & REFUND SHORTAGES
     masterOrders.forEach(item => {
         if (item.TripID === window.selectedTrip) {
-            item.Status = 'MANIFESTED'; // This makes it visible to manifest.js
-            item.manifestedAt = new Date().toLocaleString();
+            const planned = parseInt(item.staged_qty || 0);
+            const actual = item.Final_Loaded !== undefined ? parseInt(item.Final_Loaded) : planned;
+            const shortage = planned - actual;
+
+            if (shortage > 0) {
+                // THIS LINE UPDATES THE MAIN TABLE REMAINDER
+                item.qty = (parseInt(item.qty) || 0) + shortage;
+                
+                // Adjust the staged_qty so the Manifest shows the correct '3'
+                item.staged_qty = actual; 
+            }
+            item.Status = 'MANIFESTED';
         }
     });
 
-    // 2. SAVE DATABASE
+    // 3. SAVE DATABASE
     _saveMasterOrders(masterOrders);
 
-    // 3. UI FEEDBACK
-    alert(`✅ ${window.selectedTrip} has been finalized.`);
+    // 4. UI REFRESH (The Missing Step)
+    // This tells the main script to re-draw the table with the new numbers
+    if (typeof renderMasterTable === 'function') {
+        renderMasterTable();
+    }
     
-    // 4. NAVIGATE: Tell manifest.js which ID to show and switch tabs
+    // Also update the Load Tray if it's open
+    if (typeof renderLoadTray === 'function') {
+        renderLoadTray();
+    }
+
+    // 5. UI FEEDBACK
+    alert(`✅ ${window.selectedTrip} has been finalized. Shortages returned to Master Stock.`);
+    
+    // 6. NAVIGATE
     window.activeManifestID = window.selectedTrip; 
     showSection('manifestPane');
 };
 
 function renderDispatchRow(item, reasons, isLocked) {
-    // Check if the item is already processed in some way
     const isDone = item.Status === 'VERIFIED' || item.Status === 'MANIFESTED' || item.Status === 'DISPATCHED';
     const planned = item.staged_qty || 0;
     
-    // Recover saved reason from Note
     let savedReason = "";
     if (item.Note) {
         reasons.forEach(r => { if (item.Note.includes(r)) savedReason = r; });
@@ -255,12 +305,14 @@ function renderDispatchRow(item, reasons, isLocked) {
                        class="form-control form-control-sm text-center fw-bold border-primary mx-auto" 
                        style="width:75px; background: ${isLocked ? '#f8f9fa' : '#f0f7ff'};"
                        value="${item.Final_Loaded ?? planned}"
-                       ${isLocked ? 'disabled' : ''}>
+                       ${isLocked ? 'disabled' : ''}
+                       oninput="window.passiveSaveLine('${item.fingerprint}')">
             </td>
             <td>
                 <select class="form-select form-select-sm border-0 bg-light small" 
                         id="reason_${item.fingerprint}"
-                        ${isLocked ? 'disabled' : ''}>
+                        ${isLocked ? 'disabled' : ''}
+                        oninput="window.passiveSaveLine('${item.fingerprint}')">
                     <option value="" ${savedReason === "" ? 'selected' : ''}>-- No Issue --</option>
                     ${reasons.map(r => `<option value="${r}" ${savedReason === r ? 'selected' : ''}>${r}</option>`).join('')}
                     <option value="Other" ${savedReason === "Other" ? 'selected' : ''}>Other...</option>
@@ -290,10 +342,42 @@ function renderDispatchRow(item, reasons, isLocked) {
     `;
 }
 
+window.passiveSaveLine = (fingerprint) => {
+    const masterOrders = _getMasterOrders();
+    const item = masterOrders.find(o => o.fingerprint === fingerprint);
+    if (!item) return;
+
+    const actualInput = document.getElementById(`actual_${fingerprint}`);
+    const reasonSelect = document.getElementById(`reason_${fingerprint}`);
+    
+    if (!actualInput || !reasonSelect) return;
+
+    const actualQty = parseInt(actualInput.value);
+    const planned = item.staged_qty || 0;
+    const reason = reasonSelect.value;
+
+    // Update the record silently in memory
+    item.Final_Loaded = isNaN(actualQty) ? planned : actualQty;
+    
+    if (actualQty < planned) {
+        item.BounceBackQty = planned - actualQty;
+        item.Note = `SHORT: ${item.BounceBackQty} units (${reason || 'Reason Pending'})`;
+    } else if (actualQty > planned) {
+        item.Note = `OVER-LOADED (+${actualQty - planned})`;
+    } else {
+        item.BounceBackQty = 0;
+        item.Note = "Fully Loaded";
+    }
+
+    // Save to database but DO NOT call renderDispatchTable()
+    _saveMasterOrders(masterOrders);
+    
+    console.log(`Passive save complete for ${fingerprint}: ${item.Final_Loaded} units.`);
+};
+
 // ─────────────────────────────────────────────────────────────
 // LOGIC FUNCTIONS
 // ─────────────────────────────────────────────────────────────
-
 window.verifyLineItem = (fingerprint) => {
     const masterOrders = _getMasterOrders();
     const item = masterOrders.find(o => o.fingerprint === fingerprint);
@@ -304,31 +388,42 @@ window.verifyLineItem = (fingerprint) => {
     
     const actualQty = parseInt(actualInput.value);
     const planned = item.staged_qty || 0;
-    const reason = reasonSelect.value;
+    let reason = reasonSelect.value;
 
+    // 1. VALIDATION
     if (isNaN(actualQty) || actualQty < 0) return alert("Please enter a valid loaded quantity.");
     if (actualQty < planned && !reason) return alert("A reason is required if you are loading less than planned.");
 
-    // Apply verification
+    // 2. SPECIAL HANDLING: "Other" Reason
+    if (actualQty < planned && reason === 'Other') {
+        const custom = prompt("Enter specific reason for shortage:");
+        if (!custom) return; // Cancel if they don't provide details for 'Other'
+        reason = custom;
+    }
+
+    // 3. APPLY VERIFICATION & UPDATE NOTES
     item.Final_Loaded = actualQty;
     item.Status = 'VERIFIED';
     
     if (actualQty < planned) {
         item.BounceBackQty = planned - actualQty;
-        let finalReason = reason;
-        if (reason === 'Other') {
-            const custom = prompt("Enter specific reason:");
-            finalReason = custom || "Other";
-        }
-        item.Note = `SHORT: ${item.BounceBackQty} units (${finalReason})`;
+        item.Note = `SHORT: ${item.BounceBackQty} units (${reason})`;
+    } else if (actualQty > planned) {
+        item.BounceBackQty = 0;
+        item.Note = `OVER-LOADED (+${actualQty - planned})`;
     } else {
         item.BounceBackQty = 0;
-        item.Note = actualQty > planned ? `OVER-LOADED (+${actualQty - planned})` : "Fully Loaded";
+        item.Note = "Fully Loaded";
     }
 
+    // 4. SAVE & REDRAW
     _saveMasterOrders(masterOrders);
+    
+    // Now when this re-renders, it pulls the latest numbers for ALL rows 
+    // from localStorage (thanks to the passive save)
     renderDispatchTable();
 };
+
 
 window.pullBackLine = (fingerprint) => {
     const masterOrders = _getMasterOrders();

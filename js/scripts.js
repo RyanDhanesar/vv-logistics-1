@@ -716,10 +716,12 @@ function _renderAreaChips() {
    ================================================================ */
 
 function renderMasterTable() {
+    // RE-SYNC BEFORE RENDERING
+    masterOrders = JSON.parse(localStorage.getItem('masterOrders')) || [];
+    
     const container = document.getElementById('masterTableContainer');
     if (!container) return;
 
-    // Build the shell ONCE — preserves input focus
     if (!document.getElementById('_zoneNavShell')) {
         _buildOrGetNavShell(container);
     }
@@ -752,7 +754,6 @@ window._renderTableOnly = function () {
         'default':      { width: '120px' },
         'GRV-ed':       { width: '50px' },
         'Overdue ':   { width: '50px' },
-        'Staged_Qty':   { width: '50px' }
     };
 
     let filtered = masterOrders.filter(row => {
@@ -769,7 +770,7 @@ window._renderTableOnly = function () {
     }
 
     const displayData = filtered.slice(0, limit);
-    const ignoreList = ['fingerprint', 'original_qty', 'Staged_Qty', 'OVERDUE QI', 'TripID', 'Final_Loaded', 'added_at', 'Zone', 'BounceBackQty'];
+    const ignoreList = ['fingerprint', 'original_qty', 'Staged_Qty', 'staged_qty', 'OVERDUE QI', 'TripID', 'Final_Loaded', 'added_at', 'Zone', 'BounceBackQty', 'Area'];
     const allKeysSet = new Set();
     masterOrders.forEach(o => Object.keys(o).forEach(k => allKeysSet.add(k)));
     const allPossibleHeaders = [...allKeysSet].filter(h => !ignoreList.includes(h));
@@ -823,7 +824,7 @@ window._renderTableOnly = function () {
                         }).join('')}
                         <td class="text-end px-3 bg-white" style="position:sticky; right:0; border-left:1px solid #f1f5f9;">
                             <div class="input-group input-group-sm">
-                                <input type="number" class="form-control text-center border-light bg-light fw-bold" id="qtyInput_${row.fingerprint}" value="${row.qty > 0 ? row.qty : ''}" placeholder="-">
+                                <input type="number" class="form-control text-center border-light bg-light fw-bold" id="qtyInput_${row.fingerprint}" value="" placeholder="0" min="0">
                                 <button class="btn ${isAllocated ? 'btn-outline-primary' : 'btn-primary'} fw-bold d-flex align-items-center justify-content-center" 
                                         style="width: 42px; height: 32px;"
                                         onclick="stageItemInline('${row.fingerprint}')"
@@ -1271,7 +1272,10 @@ function renderLoadTray() {
     }
 
     const totalUnits = stagedLoad.reduce((acc, curr) => acc + (curr.loaded || 0), 0);
-    const isExisting = !!window.currentOpenTripID;
+    
+    // Get list of active trips that can be appended to
+    const masterOrders = JSON.parse(localStorage.getItem('masterOrders')) || [];
+    const activeTrips = [...new Set(masterOrders.filter(o => o.TripID && o.Status === 'ALLOCATED').map(o => o.TripID))];
 
     const listItems = stagedLoad.map((item) => `
         <div style="padding:12px 16px; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center; background:#fff;">
@@ -1295,16 +1299,24 @@ function renderLoadTray() {
     trayContent.innerHTML = `
         <div style="padding:16px; background:#f8fafc; border-bottom:1px solid #e2e8f0; flex-shrink:0;">
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <span class="fw-bold text-uppercase text-secondary" style="font-size:0.7rem; letter-spacing:1px;">Draft Load</span>
-                <span class="badge bg-slate text-white" style="font-size:0.65rem; background:#334155;">${stagedLoad.length} ITEMS</span>
+                <span class="fw-bold text-uppercase text-secondary" style="font-size:0.7rem; letter-spacing:1px;">Draft Tray</span>
+                <span class="badge bg-dark text-white" style="font-size:0.65rem;">${stagedLoad.length} ITEMS</span>
             </div>
-            <div class="h5 fw-bold mb-0">${totalUnits} <span class="text-muted small fw-normal">Total Units</span></div>
+            <div class="h5 fw-bold mb-3">${totalUnits} <span class="text-muted small fw-normal">Total Units</span></div>
             
-            <button class="btn btn-outline-dark btn-sm w-100 mt-3 fw-bold no-print" onclick="printDraftWorksheet()">
+            <div class="mb-3">
+                <label class="smallest fw-bold text-uppercase text-muted d-block mb-1" style="font-size:0.6rem;">Destination Load Sheet</label>
+                <select id="tripTargetSelector" class="form-select form-select-sm fw-bold border-primary shadow-sm" style="font-size:0.8rem;">
+                    <option value="NEW_TRIP">+ START FRESH LOAD SHEET</option>
+                    ${activeTrips.map(id => `
+                        <option value="${id}" ${window.currentOpenTripID === id ? 'selected' : ''}>APPEND TO ${id}</option>
+                    `).join('')}
+                </select>
+            </div>
+
+            <button class="btn btn-outline-dark btn-sm w-100 fw-bold no-print" onclick="printDraftWorksheet()">
                 <i class="bi bi-printer me-2"></i> PRINT CHECK-SHEET
             </button>
-
-            ${isExisting ? `<div class="mt-2 small text-primary fw-bold"><i class="bi bi-link-45deg"></i> Appending to: ${window.currentOpenTripID}</div>` : ''}
         </div>
 
         <div style="flex:1; overflow-y:auto; background:#fff;">
@@ -1312,12 +1324,9 @@ function renderLoadTray() {
         </div>
 
         <div style="padding:16px; border-top:1px solid #e2e8f0; background:#f8fafc; flex-shrink:0;">
-            <button class="btn btn-primary w-100 fw-bold py-2 mb-2 shadow-sm" type="button" onclick="finalizeLoad()">
-                ${isExisting ? 'UPDATE LOAD SHEET' : 'CREATE LOAD SHEET'}
+            <button class="btn btn-primary w-100 fw-bold py-2 shadow-sm" type="button" onclick="finalizeLoad()">
+                FINALISE ALLOCATIONS
             </button>
-            <div class="text-center text-muted" style="font-size:0.65rem;">
-                FINALIZING WILL MOVE ITEMS TO ACTIVE MANIFESTS
-            </div>
         </div>
     `;
 }
@@ -1376,54 +1385,56 @@ window.printDraftWorksheet = () => {
 /* ================================================================
    FINALIZE / TRIP MANAGEMENT
    ================================================================ */
-
 window.finalizeLoad = () => {
     if (stagedLoad.length === 0) return;
 
-    const tripZone    = stagedLoad[0].Zone || 'UNASSIGNED';
-    const isMixedZone = stagedLoad.some(item => item.Zone !== tripZone);
+    const selector = document.getElementById('tripTargetSelector');
+    const targetValue = selector ? selector.value : 'NEW_TRIP';
+    
+    let tripId;
 
-    if (isMixedZone) return alert("ZONE ERROR: Please only allocate one zone at a time.");
-
-    let tripId = window.currentOpenTripID;
-
-    if (!tripId) {
+    if (targetValue === 'NEW_TRIP') {
+        // Create a new ID
         tripId = "LS-" + Math.floor(Math.random() * 9000 + 1000);
-        if (!confirm(`START NEW LOAD: Generate ${tripId} for ${tripZone}?`)) return;
         window.currentOpenTripID = tripId;
     } else {
-        const append = confirm(`APPEND TO LOAD: Add these items to the current ${tripId}?`);
-        if (!append) {
-            if (confirm("Would you like to close the current trip and start a FRESH one?")) {
-                window.currentOpenTripID = null;
-                return finalizeLoad();
-            }
-            return;
-        }
+        // Use the existing ID selected from dropdown
+        tripId = targetValue;
+        window.currentOpenTripID = tripId;
     }
 
+    // Allocate items in tray to the selected Trip ID
     stagedLoad.forEach(stagedItem => {
         const masterItem = masterOrders.find(o => o.fingerprint === stagedItem.fingerprint);
         if (masterItem) {
-            masterItem.Status     = 'ALLOCATED';
-            masterItem.TripID     = tripId;
-            masterItem.staged_qty = (masterItem.staged_qty || 0) + stagedItem.loaded;
-            masterItem.Zone       = tripZone;
+            masterItem.Status = 'ALLOCATED';
+            masterItem.TripID = tripId;
+            masterItem.staged_qty = stagedItem.loaded; 
+            masterItem.Final_Loaded = undefined; 
         }
     });
 
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
-    alert(`LOAD UPDATED: ${tripId} has been updated with new allocations.`);
-
+    
+    // Clear the tray and refresh UI
     stagedLoad = [];
+    alert(`SUCCESS: Items moved to Load Sheet ${tripId}`);
+    
     renderMasterTable();
     renderLoadTray();
 
+    // Close the drawer automatically
     const drawerEl = document.getElementById('loadTrayDrawer');
-    if (drawerEl) bootstrap.Offcanvas.getInstance(drawerEl)?.hide();
+    if (drawerEl) {
+        const instance = bootstrap.Offcanvas.getInstance(drawerEl);
+        if (instance) instance.hide();
+    }
 
+    // Switch to the Load Sheets tab
     const dispatchTabEl = document.querySelector('#dispatch-tab');
-    if (dispatchTabEl) new bootstrap.Tab(dispatchTabEl).show();
+    if (dispatchTabEl) {
+        new bootstrap.Tab(dispatchTabEl).show();
+    }
 };
 
 window.removeLineFromTrip = (fingerprint) => {
