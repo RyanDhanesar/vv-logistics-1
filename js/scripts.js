@@ -971,7 +971,7 @@ function _renderColumnToggle(allHeaders, visibleHeaders) {
         </div>
     `;
 
-    // Close menu when clicking outside
+    // Close menu when clicking outside helloe
     document.addEventListener('click', (e) => {
         const menu = document.getElementById('_colMenu');
         if (menu && !menu.contains(e.target)) menu.style.display = 'none';
@@ -1091,13 +1091,13 @@ window.refreshZoneManagerUI = () => {
                                             onclick="moveAreaSilent('${entry.replace(/'/g, "\\'")}', '${z}', 'UNASSIGNED')"
                                             class="btn-close" style="font-size:0.5rem;"></button>
                                 </div>`;
-                            }).join('')}
+                            }).join('')} 
                         </div>
                     </div>
                 </div>
             `).join('')}
         </div>
-
+                            
         <div class="mt-5 pt-4 border-top">
             <div class="bg-secondary bg-opacity-10 p-4 rounded mb-4">
                 <div class="d-flex align-items-center justify-content-between">
