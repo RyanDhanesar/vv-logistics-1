@@ -1048,13 +1048,13 @@ window.refreshZoneManagerUI = () => {
                                 <ul class="dropdown-menu dropdown-menu-scroll shadow border-0">
                                     <li class="px-2 pb-2 sticky-top bg-white">
                                         <input type="text" class="form-control form-control-sm"
-                                               placeholder="Search zone..." onkeyup="filterDropdown(this)">
+                                                 placeholder="Search zone..." onkeyup="filterDropdown(this)">
                                     </li>
                                     ${zoneNames.map(z => `
                                         <li class="zone-item">
                                             <a class="dropdown-item rounded small py-2" href="#"
                                                onclick="moveAreaSilent('${a.replace(/'/g, "\\'")}', 'UNASSIGNED', '${z}'); return false;">
-                                                Move to: <b>${z}</b>
+                                                 Move to: <b>${z}</b>
                                             </a>
                                         </li>
                                     `).join('')}
@@ -1099,7 +1099,7 @@ window.refreshZoneManagerUI = () => {
         </div>
 
         <div class="mt-5 pt-4 border-top">
-            <div class="bg-secondary bg-opacity-10 p-4 rounded">
+            <div class="bg-secondary bg-opacity-10 p-4 rounded mb-4">
                 <div class="d-flex align-items-center justify-content-between">
                     <div>
                         <h6 class="small fw-bold text-dark text-uppercase mb-1">Master Logistics Engine</h6>
@@ -1109,6 +1109,18 @@ window.refreshZoneManagerUI = () => {
                         IMPORT MASTER LIST
                         <input type="file" hidden accept=".csv,.xlsx,.xls" onchange="handleMasterBranchUpload(event)">
                     </label>
+                </div>
+            </div>
+
+            <div class="card border-danger border-opacity-25 bg-danger bg-opacity-10 shadow-sm">
+                <div class="card-body d-flex align-items-center justify-content-between py-3">
+                    <div>
+                        <h6 class="small fw-bold text-danger text-uppercase mb-1">Danger Zone: System Reset</h6>
+                        <p class="smallest text-muted mb-0">Wipe all orders and manifests to start a fresh day. <br><b>Mappings are preserved.</b></p>
+                    </div>
+                    <button class="btn btn-sm btn-danger fw-bold px-4" onclick="systemReset()">
+                        RESET DAILY DATA
+                    </button>
                 </div>
             </div>
         </div>
@@ -1184,11 +1196,36 @@ window.renameZone = (oldName, newName) => {
    ================================================================ */
 
 window.systemReset = () => {
-    if (!confirm("Are you sure? This will clear all CURRENT ORDERS but keep your ZONE and BRANCH mappings.")) return;
-    localStorage.removeItem('masterOrders');
+    const msg = "SYSTEM RESET: This will wipe all current orders, load sheets, and manifest data.\n\n" +
+                "NOTE: Your Branch-to-Region mappings will remain safe.\n\n" +
+                "Proceed with a clean slate?";
+
+    if (!confirm(msg)) return;
+
+    // 1. Clear Data Arrays
     masterOrders = [];
+    stagedLoad = [];
+
+    // 2. Reset Global UI States
+    window.currentOpenTripID = null; // Forces next draft to start a new LS-XXXX
+    window.selectedTrip = null;      // Unselects trip in the dispatch view
+    window.currentZoneFilter = 'ALL';
+    window.currentAreaFilter = 'ALL';
+
+    // 3. Clear LocalStorage (Only things related to daily work)
+    localStorage.removeItem('masterOrders');
+    // localStorage.removeItem('activeManifests'); // Use if you have a separate trip log
+
+    // 4. Refresh All UI Components
     renderMasterTable();
-    alert("Daily data cleared. Logistics zones preserved.");
+    renderLoadTray();
+
+    // 5. Cross-file Refresh (updates the Load Sheets tab if it's open)
+    if (typeof renderDispatchTable === 'function') {
+        renderDispatchTable();
+    }
+
+    alert("DAILY DATA WIPED: You can now upload fresh factory files.");
 };
 
 /* ================================================================
