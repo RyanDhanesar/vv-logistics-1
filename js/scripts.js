@@ -1115,7 +1115,7 @@ window.refreshZoneManagerUI = () => {
             <div class="card border-danger border-opacity-25 bg-danger bg-opacity-10 shadow-sm">
                 <div class="card-body d-flex align-items-center justify-content-between py-3">
                     <div>
-                        <h6 class="small fw-bold text-danger text-uppercase mb-1">Danger Zone: System Reset</h6>
+                        <h6 class="small fw-bold text-danger text-uppercase mb-1">For Demo Purposes Only: System Reset</h6>
                         <p class="smallest text-muted mb-0">Wipe all orders and manifests to start a fresh day. <br><b>Mappings are preserved.</b></p>
                     </div>
                     <button class="btn btn-sm btn-danger fw-bold px-4" onclick="systemReset()">
