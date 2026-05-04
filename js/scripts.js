@@ -200,60 +200,99 @@ function renderPreview(result) {
 
 // Exposed on window so onclick="window.commitToMaster()" always resolves
 window.commitToMaster = function commitToMaster() {
-    console.log('[commitToMaster] fired');
-
-    // Use window._stagedPreviewResult as primary (survives any DOM re-render),
-    // fall back to the module-level currentResult
     const source = window._stagedPreviewResult || currentResult;
-
-    console.log('[commitToMaster] source:', source);
-
-    if (!source || !source.preview || source.preview.length === 0) {
-        return alert("ERROR: No staged data to commit. Please re-upload your file.");
-    }
+    if (!source || !source.preview || source.preview.length === 0) return alert("Error: No data.");
 
     const uploadTimestamp = new Date().toLocaleString();
+    let newCount = 0;
+    let duplicateCount = 0;
 
-    const newItems = source.preview.map((item, idx) => {
-        // Find "required" quantity column flexibly
-        const qtyKey    = Object.keys(item).find(k => k.toUpperCase().includes('REQUIRED'));
-        const actualQty = parseInt(qtyKey ? item[qtyKey] : 0) || 0;
+    // Use a temporary array to hold items that aren't duplicates
+    const incomingItems = [];
 
-        // Guarantee a unique fingerprint
-        const fingerprint = (item.fingerprint && String(item.fingerprint).trim())
-            ? item.fingerprint
-            : `fp-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 6)}`;
+    source.preview.forEach((item) => {
+        // 1. Identify key columns for a "Real" fingerprint
+        const qtyKey = Object.keys(item).find(k => k.toUpperCase().includes('REQUIRED'));
+        const ordKey = Object.keys(item).find(k => k.toUpperCase().includes('ORD')) || '';
+        const brnKey = Object.keys(item).find(k => k.toUpperCase().includes('BRN')) || '';
+        
+        const actualQty = parseInt(item[qtyKey] || 0) || 0;
 
-        return {
-            ...item,
-            fingerprint,
-            qty:          actualQty,
-            original_qty: actualQty,
-            staged_qty:   0,
-            Status:       'Pending',
-            added_at:     uploadTimestamp,
-        };
+        // 2. Generate a "Stable Fingerprint" based on data, not time
+        const rawString = `${item[ordKey]}-${item[brnKey]}-${item.Description || item.description || ''}`;
+        const stableFingerprint = btoa(rawString).substring(0, 24); 
+
+        // 3. CHECK FOR DUPLICATES in existing masterOrders
+        const isDuplicate = masterOrders.some(existing => existing.fingerprint === stableFingerprint);
+
+        if (isDuplicate) {
+            duplicateCount++;
+        } else {
+            incomingItems.push({
+                ...item,
+                fingerprint: stableFingerprint,
+                qty: actualQty,
+                original_qty: actualQty,
+                staged_qty: 0,
+                Status: 'Pending',
+                added_at: uploadTimestamp,
+            });
+            newCount++;
+        }
     });
 
-    console.log('[commitToMaster] newItems count:', newItems.length, 'sample:', newItems[0]);
+    // If everything was a duplicate, stop here
+    if (newCount === 0) {
+        alert(`UPLOAD BLOCKED: All ${duplicateCount} records in this file already exist in the system.`);
+        return;
+    }
 
-    processNewAreas(newItems);
-
-    masterOrders = [...newItems, ...masterOrders];
+    // 4. PROCESS & SAVE DATA
+    processNewAreas(incomingItems);
+    masterOrders = [...incomingItems, ...masterOrders];
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
 
-    // Clear staged preview so a second click doesn't double-commit
+    // 5. UI RESET — SNAP BACK TO CENTER
+    const resCol = document.getElementById('resultColumn');
+    const uploadCol = document.getElementById('uploadColumn');
+    const resLayoutRow = document.getElementById('uploadLayoutRow');
+
+    // Hide the wide table
+    if (resCol) {
+        resCol.classList.add('d-none');
+        resCol.style.setProperty('display', 'none', 'important');
+    }
+
+    // Restore the centered upload box (md-6 + justify-content-center)
+    if (uploadCol) {
+        uploadCol.className = "col-md-6"; 
+        uploadCol.style.setProperty('display', 'block', 'important');
+    }
+    if (resLayoutRow) {
+        resLayoutRow.classList.add('justify-content-center');
+    }
+
+    // Reset inputs and progress
+    if (fileInput) fileInput.value = "";
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    if (fileNameDisplay) fileNameDisplay.innerHTML = "No file selected";
+    
+    if (progressBarContainer) progressBarContainer.classList.add('d-none');
+    if (progressBar) progressBar.style.width = '0%';
+
+    // 6. FINAL FEEDBACK & NAVIGATION
+    alert(`IMPORT SUCCESSFUL!\n- New Records: ${newCount}\n- Duplicates Skipped: ${duplicateCount}`);
+
+    // Clear staged preview references
     window._stagedPreviewResult = null;
     currentResult = null;
 
-    alert(`SUCCESS: ${newItems.length} records committed and allocated to zones.`);
-
-    // Switch to master tab
-    const masterTabEl = document.querySelector('#master-tab');
-    if (masterTabEl) new bootstrap.Tab(masterTabEl).show();
-
-    // Re-render table AFTER alert so DOM state is clean
-    renderMasterTable();
+    // Small delay before switching tabs to let the UI breathe
+    setTimeout(() => {
+        const masterTabEl = document.querySelector('#master-tab');
+        if (masterTabEl) new bootstrap.Tab(masterTabEl).show();
+        renderMasterTable();
+    }, 300);
 };
 
 function processNewAreas(orders) {
@@ -731,7 +770,6 @@ function renderMasterTable() {
     window._renderTableOnly();
 }
 
-// FIX 3: Exposed on window so both JS event listener AND any inline callers work
 window._renderTableOnly = function () {
     const mount = document.getElementById('_tableMount');
     if (!mount) return;
@@ -739,7 +777,6 @@ window._renderTableOnly = function () {
     const pageSizeEl = document.getElementById('pageSize');
     const limit      = pageSizeEl ? parseInt(pageSizeEl.value) : 100;
 
-    // FIX 5: Read the search input that now lives inside _zoneNavShell
     const searchInput = document.getElementById('masterSearch');
     const searchTerm  = searchInput ? searchInput.value.toLowerCase().trim() : "";
 
@@ -749,18 +786,18 @@ window._renderTableOnly = function () {
         'Brn No':       { width: '70px'  },
         'Description':  { width: '220px' },
         'Ord No':       { width: '110px' },
-        'qty':          { label: 'REMAINDER', width: '110px' },
-        'Status':       { width: '130px' },
+        'qty':          { label: 'STOCK QTY', width: '110px' }, // Terminology fix
+        'Status':       { width: '200px' }, 
         'default':      { width: '120px' },
-        'GRV-ed':       { width: '50px' },
-        'Overdue ':   { width: '50px' },
     };
 
+    // --- FILTER: Only show Master Warehouse rows ---
     let filtered = masterOrders.filter(row => {
+        const isMasterRow = !row.parent_fingerprint; 
         const matchesSearch = !searchTerm || Object.values(row).some(val => String(val).toLowerCase().includes(searchTerm));
         const matchesZone = window.currentZoneFilter === 'ALL' || row.Zone === window.currentZoneFilter;
         const matchesArea = window.currentAreaFilter === 'ALL' || row.Area === window.currentAreaFilter;
-        return matchesSearch && matchesZone && matchesArea;
+        return isMasterRow && matchesSearch && matchesZone && matchesArea;
     });
 
     if (window.currentSort === 'area') {
@@ -770,7 +807,8 @@ window._renderTableOnly = function () {
     }
 
     const displayData = filtered.slice(0, limit);
-    const ignoreList = ['fingerprint', 'original_qty', 'Staged_Qty', 'staged_qty', 'OVERDUE QI', 'TripID', 'Final_Loaded', 'added_at', 'Zone', 'BounceBackQty', 'Area'];
+    const ignoreList = ['fingerprint', 'original_qty', 'Staged_Qty', 'staged_qty', 'OVERDUE QI', 'TripID', 'Final_Loaded', 'added_at', 'Zone', 'BounceBackQty', 'Area', 'parent_fingerprint'];
+    
     const allKeysSet = new Set();
     masterOrders.forEach(o => Object.keys(o).forEach(k => allKeysSet.add(k)));
     const allPossibleHeaders = [...allKeysSet].filter(h => !ignoreList.includes(h));
@@ -778,60 +816,94 @@ window._renderTableOnly = function () {
     const headers = allPossibleHeaders.filter(h => !hiddenColumns.includes(h));
 
     mount.innerHTML = `
-        <table class="table table-hover align-middle mb-0 bg-white" style="width:max-content; min-width:100%; table-layout: fixed;">
-            <thead style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+        <style>
+            @keyframes badgePulse {
+                0% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.7; transform: scale(0.95); }
+                100% { opacity: 1; transform: scale(1); }
+            }
+            .pulse-badge { animation: badgePulse 2s infinite ease-in-out; }
+            .row-in-tray { background-color: #e7f1ff !important; border-left: 4px solid #0d6efd !important; }
+        </style>
+
+        <table class="table table-hover align-middle mb-0 bg-white" style="width:max-content; min-width:100%; table-layout: fixed; border-collapse: separate; border-spacing: 0;">
+            <thead style="position: sticky; top: 0; z-index: 100; background: #f8fafc;">
                 <tr>
                     ${headers.map(h => {
                         const config = colConfig[h] || colConfig['default'];
                         const label  = config.label || h;
-                        return `<th class="px-3 py-3 text-uppercase text-secondary fw-bold" style="width:${config.width}; font-size:0.7rem; letter-spacing:0.05em;">${label}</th>`;
+                        return `
+                            <th class="px-3 py-3 text-uppercase text-secondary fw-bold" 
+                                style="width:${config.width}; font-size:0.7rem; letter-spacing:0.05em; background: #f8fafc; border-bottom: 2px solid #e2e8f0; position: sticky; top: 0;">
+                                ${label}
+                            </th>`;
                     }).join('')}
-                    <th class="text-end px-3 bg-light sticky-end" style="width:180px; position:sticky; right:0; z-index:10; border-left: 1px solid #e2e8f0;">Load Here</th>
+                    <th class="text-end px-3 bg-light sticky-end" 
+                        style="width:200px; position:sticky; top: 0; right:0; z-index:110; border-left: 1px solid #e2e8f0; border-bottom: 2px solid #e2e8f0; background: #f8fafc;">
+                        Add to Load Sheet
+                    </th>
                 </tr>
             </thead>
             <tbody style="border-top: 0;">
                 ${displayData.length === 0 ? `
                     <tr><td colspan="${headers.length + 1}" class="text-center py-5 text-muted">No records matching filters.</td></tr>
                 ` : displayData.map(row => {
-                    const statusVal  = (row.Status || "Pending").toUpperCase();
-                    const isAllocated = statusVal === 'ALLOCATED';
+                    // Logic: Check if item is currently in the Tray (stagedLoad)
+                    const itemInTray = (stagedLoad || []).find(o => o.fingerprint === row.fingerprint);
+                    const trayQty = itemInTray ? itemInTray.loaded : 0;
+
+                    // Logic: Check finalized breakdown
+                    const clones = masterOrders.filter(o => o.parent_fingerprint === row.fingerprint);
+                    const totalRequired = row.original_qty || row.qty;
+                    const remainingInStock = row.qty;
+                    
+                    const inLoading = clones.filter(c => c.Status === 'ALLOCATED' || c.Status === 'VERIFIED').reduce((s, c) => s + (c.staged_qty || 0), 0);
+                    const inManifest = clones.filter(c => c.Status === 'MANIFESTED').reduce((s, c) => s + (c.staged_qty || 0), 0);
+                    const inShipped = clones.filter(c => c.Status === 'DISPATCHED').reduce((s, c) => s + (c.staged_qty || 0), 0);
+
+                    // Determine row style
+                    let rowClass = "";
+                    if (trayQty > 0) rowClass = "row-in-tray";
+                    else if (remainingInStock === 0) rowClass = "table-success-subtle";
+                    else if (remainingInStock < totalRequired) rowClass = "table-warning-subtle";
+
                     return `
-                    <tr style="font-size:0.82rem; border-bottom: 1px solid #f1f5f9;">
+                    <tr class="${rowClass}" style="font-size:0.82rem; border-bottom: 1px solid #f1f5f9;">
                         ${headers.map(h => {
                             const config = colConfig[h] || colConfig['default'];
                             let content  = row[h] ?? "";
-                            // Locate this block inside window._renderTableOnly
+                            
                             if (h === 'Status') {
-                                let badgeClass = 'bg-light text-secondary border'; // Default
-
-                                // ADD THESE SPECIFIC CHECKS:
-                                if (statusVal === 'PENDING') {
-                                    badgeClass = 'bg-secondary-subtle text-secondary border border-secondary-subtle'; // Soft Grey
-                                } else if (statusVal === 'STAGED' || statusVal === 'ALLOCATED') {
-                                    badgeClass = 'bg-primary-subtle text-primary border border-primary-subtle'; // Blue
-                                } else if (statusVal === 'LOADED' || statusVal === 'VERIFIED') {
-                                    badgeClass = 'bg-success-subtle text-success border border-success-subtle'; // Green
-                                } else if (statusVal === 'MANIFESTED') {
-                                    badgeClass = 'bg-purple-subtle text-purple border border-purple-subtle'; // Purple
-                                } else if (statusVal === 'DISPATCHED') {
-                                    badgeClass = 'bg-dark text-white border-dark'; // Black
-                                }
-
-                                content = `<span class="badge ${badgeClass} px-2 py-1">${statusVal}</span>`;
+                                content = `
+                                    <div class="d-flex flex-wrap gap-1">
+                                        ${inShipped > 0 ? `<span class="badge bg-dark">${inShipped} SHIPPED</span>` : ''}
+                                        ${inManifest > 0 ? `<span class="badge text-white" style="background:#6f42c1;">${inManifest} MANIFEST</span>` : ''}
+                                        ${inLoading > 0 ? `<span class="badge bg-warning text-dark border border-warning">${inLoading} LOADING</span>` : ''}
+                                        ${trayQty > 0 ? `<span class="badge bg-primary text-white pulse-badge">${trayQty} IN TRAY</span>` : ''}
+                                        ${remainingInStock > 0 ? `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">${remainingInStock} STOCK</span>` : ''}
+                                    </div>
+                                `;
                             }
-                            if (h === 'qty')    content = `<span class="fw-bold text-primary">${row[h]}</span>`;
+                            if (h === 'qty') content = `<span class="fw-bold text-primary">${remainingInStock}</span>`;
+                            
                             return `<td class="px-3 py-2 text-truncate" style="width:${config.width};" title="${String(row[h]||'')}">${content}</td>`;
                         }).join('')}
-                        <td class="text-end px-3 bg-white" style="position:sticky; right:0; border-left:1px solid #f1f5f9;">
-                            <div class="input-group input-group-sm">
-                                <input type="number" class="form-control text-center border-light bg-light fw-bold" id="qtyInput_${row.fingerprint}" value="" placeholder="0" min="0">
-                                <button class="btn ${isAllocated ? 'btn-outline-primary' : 'btn-primary'} fw-bold d-flex align-items-center justify-content-center" 
-                                        style="width: 42px; height: 32px;"
-                                        onclick="stageItemInline('${row.fingerprint}')"
-                                        title="${isAllocated ? 'Add more to this load' : 'Load this item'}">
-                                    <i class="bi ${isAllocated ? 'bi-truck-flatbed' : 'bi-truck'}"></i>
-                                </button>
-                            </div>
+                        <td class="text-end px-3" style="position:sticky; right:0; border-left:1px solid #f1f5f9; z-index: 5; background: inherit;">
+                            ${remainingInStock > 0 ? `
+                                <div class="input-group input-group-sm">
+                                    <input type="number" class="form-control text-center border-light bg-light fw-bold" 
+                                           id="qtyInput_${row.fingerprint}" 
+                                           placeholder="0" 
+                                           max="${remainingInStock}" min="1">
+                                    <button class="btn btn-primary fw-bold d-flex align-items-center justify-content-center" 
+                                            style="width: 42px; height: 32px;"
+                                            onclick="stageItemInline('${row.fingerprint}')">
+                                        <i class="bi bi-plus-lg"></i>
+                                    </button>
+                                </div>
+                            ` : `
+                                <span class="text-success fw-bold small text-uppercase"><i class="bi bi-check-circle-fill me-1"></i> Allocated</span>
+                            `}
                         </td>
                     </tr>`;
                 }).join('')}
@@ -1237,31 +1309,37 @@ window.stageItemInline = (fingerprint) => {
     if (!item) return;
 
     const inputEl = document.getElementById(`qtyInput_${fingerprint}`);
-    const amount  = parseInt(inputEl.value);
+    const amount = parseInt(inputEl.value);
 
-    if (isNaN(amount) || amount <= 0) return alert("STOP: You must enter a positive number to allocate.");
-    if (amount > item.qty) return alert(`LOGIC ERROR: You are trying to allocate ${amount} units, but only ${item.qty} are available.`);
+    // 1. Validation
+    if (isNaN(amount) || amount <= 0) return alert("Enter a valid quantity.");
+    if (amount > item.qty) return alert(`Only ${item.qty} units remaining in the Warehouse Pool.`);
 
-    item.qty       -= amount;
-    item.staged_qty = (item.staged_qty || 0) + amount;
-    item.Status     = 'ALLOCATED';
+    // 2. Subtract from Warehouse Pool immediately so another user/truck can't take it
+    // We also set the original_qty here if it's the first time this item is being loaded
+    if (!item.original_qty) item.original_qty = item.qty;
+    item.qty -= amount;
 
+    // 3. Update the Tray (The Draft area)
     const trayItem = stagedLoad.find(o => o.fingerprint === fingerprint);
     if (trayItem) {
         trayItem.loaded += amount;
     } else {
-        const descKey = Object.keys(item).find(k => k.toLowerCase().includes('desc')) || Object.keys(item)[2];
+        const descKey = Object.keys(item).find(k => k.toLowerCase().includes('desc')) || 'Description';
         stagedLoad.push({
+            ...item, // Keep all the metadata (Area, Zone, Brn No, etc)
             fingerprint: item.fingerprint,
-            Zone:        item.Zone || 'UNASSIGNED',
-            Area:        item.Area,
             description: item[descKey],
-            loaded:      amount
+            loaded: amount
         });
     }
 
-    localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
-    window._renderTableOnly();   // FIX: lightweight re-render, preserves search input
+    // 4. Reset the UI input
+    inputEl.value = "";
+
+    // 5. Save and Refresh
+    _saveMasterOrders(masterOrders); 
+    window._renderTableOnly(); 
     renderLoadTray();
 };
 
@@ -1276,16 +1354,17 @@ window.removeFromTray = (fingerprint) => {
     const trayItem   = stagedLoad[trayIndex];
     const masterItem = masterOrders.find(o => o.fingerprint === fingerprint);
 
+    // REFUND: Put the stock back into the Warehouse Pool
     if (masterItem) {
-        masterItem.qty       += trayItem.loaded;
-        masterItem.staged_qty = Math.max(0, (masterItem.staged_qty || 0) - trayItem.loaded);
-        if (masterItem.staged_qty <= 0 && !masterItem.TripID) {
-            masterItem.staged_qty = 0;
-            masterItem.Status     = 'Pending';
-        }
+        masterItem.qty += trayItem.loaded;
+        // We stop touching masterItem.Status or masterItem.staged_qty here.
+        // The dynamic badges in _renderTableOnly will handle the visual status.
     }
 
+    // Remove from the temporary tray
     stagedLoad.splice(trayIndex, 1);
+
+    // Save and Refresh UI
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
     window._renderTableOnly();
     renderLoadTray();
@@ -1427,52 +1506,53 @@ window.finalizeLoad = () => {
 
     const selector = document.getElementById('tripTargetSelector');
     const targetValue = selector ? selector.value : 'NEW_TRIP';
-    
-    let tripId;
+    let tripId = targetValue === 'NEW_TRIP' 
+        ? "LS-" + Math.floor(Math.random() * 9000 + 1000) 
+        : targetValue;
 
-    if (targetValue === 'NEW_TRIP') {
-        // Create a new ID
-        tripId = "LS-" + Math.floor(Math.random() * 9000 + 1000);
-        window.currentOpenTripID = tripId;
-    } else {
-        // Use the existing ID selected from dropdown
-        tripId = targetValue;
-        window.currentOpenTripID = tripId;
-    }
+    const uploadTimestamp = new Date().toLocaleString();
 
-    // Allocate items in tray to the selected Trip ID
+    // 1. Loop through the items currently in the tray
     stagedLoad.forEach(stagedItem => {
-        const masterItem = masterOrders.find(o => o.fingerprint === stagedItem.fingerprint);
-        if (masterItem) {
-            masterItem.Status = 'ALLOCATED';
-            masterItem.TripID = tripId;
-            masterItem.staged_qty = stagedItem.loaded; 
-            masterItem.Final_Loaded = undefined; 
-        }
+        const masterIndex = masterOrders.findIndex(o => o.fingerprint === stagedItem.fingerprint);
+        if (masterIndex === -1) return;
+
+        const originalItem = masterOrders[masterIndex];
+
+        // 2. CREATE A TRANSACTION RECORD (The Clone)
+        // This is the actual record that stays on the truck
+        const transactionRecord = {
+            ...originalItem,
+            // Create a unique fingerprint for this specific truck-load
+            fingerprint: `txn-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            parent_fingerprint: originalItem.fingerprint, // Link back to original
+            Status: 'ALLOCATED',
+            TripID: tripId,
+            staged_qty: stagedItem.loaded, // This truck's portion
+            qty: 0, // This is a transaction, not warehouse stock
+            added_at: uploadTimestamp
+        };
+
+        // 3. Add the transaction to the database
+        masterOrders.push(transactionRecord);
     });
 
+    // 4. SAVE & CLEANUP
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
-    
-    // Clear the tray and refresh UI
     stagedLoad = [];
-    alert(`SUCCESS: Items moved to Load Sheet ${tripId}`);
+    alert(`SUCCESS: Split load finalized for ${tripId}`);
     
     renderMasterTable();
     renderLoadTray();
 
-    // Close the drawer automatically
+    // Close drawer and switch tabs
     const drawerEl = document.getElementById('loadTrayDrawer');
-    if (drawerEl) {
-        const instance = bootstrap.Offcanvas.getInstance(drawerEl);
-        if (instance) instance.hide();
-    }
-
-    // Switch to the Load Sheets tab
+    if (drawerEl) bootstrap.Offcanvas.getInstance(drawerEl)?.hide();
+    
     const dispatchTabEl = document.querySelector('#dispatch-tab');
-    if (dispatchTabEl) {
-        new bootstrap.Tab(dispatchTabEl).show();
-    }
+    if (dispatchTabEl) new bootstrap.Tab(dispatchTabEl).show();
 };
+
 
 window.removeLineFromTrip = (fingerprint) => {
     const item = masterOrders.find(o => o.fingerprint === fingerprint);

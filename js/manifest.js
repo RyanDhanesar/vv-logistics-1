@@ -8,9 +8,9 @@ function renderManifestTable() {
 
     const masterOrders = JSON.parse(localStorage.getItem('masterOrders')) || [];
     
-    // Get unique IDs that are in MANIFESTED or DISPATCHED status
+    // --- UPDATE THIS LINE in manifest.js ---
     const manifestIDs = [...new Set(masterOrders
-        .filter(o => o.Status === 'VERIFIED' || o.Status === 'MANIFESTED' || o.Status === 'DISPATCHED')
+        .filter(o => o.Status === 'VERIFIED' || o.Status === 'MANIFESTED') // REMOVED 'DISPATCHED'
         .map(o => o.TripID))];
 
     if (manifestIDs.length === 0) {
@@ -24,200 +24,190 @@ function renderManifestTable() {
         return;
     }
 
-    // Default to the first one if none selected
     if (!window.activeManifestID || !manifestIDs.includes(window.activeManifestID)) {
         window.activeManifestID = manifestIDs[0];
     }
 
-    // --- SLEEK HORIZONTAL MANIFEST RIBBON ---
-    let html = `
-        <div class="mb-4 d-flex align-items-center justify-content-between no-print">
-            <div>
-                
-                <p class="text-muted smallest text-uppercase fw-bold mb-0" style="letter-spacing:1px;">Select document to print or dispatch</p>
-            </div>
-        </div>
-
-        <div class="d-flex align-items-center gap-2 mb-4 pb-2 border-bottom overflow-auto no-print" style="white-space: nowrap; scrollbar-width: thin;">
-            ${manifestIDs.map(id => {
-                const tripItems = masterOrders.filter(o => o.TripID === id);
-                const status = tripItems[0].Status;
-                const isSelected = window.activeManifestID === id;
-                
-                let pillClass = "bg-white text-secondary border";
-                let icon = "bi-file-earmark-check";
-
-                if (status === 'DISPATCHED') {
-                    pillClass = "bg-dark-subtle text-dark border-dark-subtle opacity-75";
-                    icon = "bi-truck-flatbed";
-                } else if (status === 'MANIFESTED') {
-                    pillClass = "bg-success-subtle text-success border-success-subtle";
-                }
-                
-                if (isSelected) pillClass = "bg-primary text-white border-primary shadow-sm";
-
-                return `
-                <div class="px-3 py-2 rounded-3 fw-bold small transition-all ${pillClass}" 
-                     style="cursor:pointer; min-width:140px; border: 1px solid;"
-                     onclick="window.activeManifestID='${id}'; renderManifestTable();">
-                    <div class="smallest opacity-75 text-uppercase" style="font-size:0.6rem;">${status === 'DISPATCHED' ? 'SHIPPED' : 'READY'}</div>
-                    <i class="bi ${icon} me-1"></i> ${id}
-                </div>`;
-            }).join('')}
-        </div>
-    `;
-
     const items = masterOrders.filter(o => o.TripID === window.activeManifestID);
-    const zone = items[0]?.Zone || 'UNASSIGNED';
     const currentStatus = items[0]?.Status;
     
-    // Fixed Payload Calculation
     const totalLoaded = items.reduce((sum, o) => {
         const qty = o.Final_Loaded !== undefined ? o.Final_Loaded : (o.staged_qty || 0);
         return sum + qty;
     }, 0);
 
-    // --- DOCUMENT VIEW & INPUTS ---
-    html += `
+    let html = `
+        <style>
+            .manifest-inv-input {
+                width: 100%;
+                border: none;
+                padding: 4px 8px;
+                background: transparent;
+                font-weight: bold;
+                outline: none;
+                color: #0d6efd;
+                text-align: center;
+            }
+
+            .highlight-required {
+                background-color: #fff9db !important;
+                border: 1px solid #fab005 !important;
+            }
+
+            @media print {
+                body * { visibility: hidden; }
+                #printableArea, #printableArea * { visibility: visible; }
+                #printableArea {
+                    position: absolute;
+                    left: 0; top: 0; width: 100%;
+                    padding: 0 !important; margin: 0 !important; border: none !important;
+                }
+                .manifest-inv-input { 
+                    color: black !important; 
+                    padding: 10px !important; 
+                    text-align: left !important;
+                }
+                .col-invoice { width: 140px !important; }
+                .no-print { display: none !important; }
+                .table-bordered, .table-bordered td, .table-bordered th {
+                    border: 1px solid #000 !important;
+                }
+                table { border-collapse: collapse !important; }
+            }
+        </style>
+
+        <div class="d-flex align-items-center gap-2 mb-4 pb-2 border-bottom overflow-auto no-print" style="white-space: nowrap; scrollbar-width: thin;">
+        ${manifestIDs.map(id => {
+            const tripItems = masterOrders.filter(o => o.TripID === id);
+            const status = tripItems[0]?.Status || 'READY';
+            const isSelected = window.activeManifestID === id;
+            
+            let statusLabel = status === 'DISPATCHED' ? "SHIPPED" : (status === 'MANIFESTED' ? "MANIFESTED" : "READY");
+            let statusClass = isSelected ? "bg-primary text-white border-primary shadow-sm" : "bg-white text-secondary border-secondary-subtle";
+
+            return `
+            <div class="px-3 py-2 rounded-3 fw-bold small transition-all ${statusClass}" 
+                    style="cursor:pointer; min-width:150px; border: 1px solid; opacity: ${status === 'DISPATCHED' && !isSelected ? '0.6' : '1'};"
+                    onclick="window.activeManifestID='${id}'; renderManifestTable();">
+                <div class="smallest text-uppercase mb-1" style="font-size:0.6rem; letter-spacing:0.5px; opacity: 0.8;">
+                    ${statusLabel}
+                </div>
+                <div class="d-flex align-items-center justify-content-between">
+                    <span>${id}</span>
+                    <i class="bi bi-file-earmark-check ms-2"></i>
+                </div>
+            </div>`;
+        }).join('')}
+        </div>
+
         <div class="d-flex justify-content-between align-items-center mb-4 no-print">
-            <span class="badge ${currentStatus === 'DISPATCHED' ? 'bg-dark' : 'bg-success'} px-3 py-2 text-uppercase">
-                <i class="bi ${currentStatus === 'DISPATCHED' ? 'bi-archive' : 'bi-check-circle'} me-2"></i>
-                ${currentStatus}
-            </span>
-            <div class="d-flex gap-2">
-                ${currentStatus === 'MANIFESTED' ? `
-                    <button class="btn btn-outline-secondary btn-sm fw-bold" onclick="reopenManifest('${window.activeManifestID}')">
-                        <i class="bi bi-unlock"></i> RE-OPEN FOR EDIT
-                    </button>
-                ` : ''}
-                <button class="btn btn-primary fw-bold px-4 shadow-sm" onclick="window.print()">
-                    <i class="bi bi-printer me-2"></i> PRINT OFFICIAL FORM
-                </button>
-            </div>
+            <span class="badge ${currentStatus === 'DISPATCHED' ? 'bg-dark' : 'bg-success'} px-3 py-2 text-uppercase">${currentStatus}</span>
+            <button class="btn btn-primary fw-bold px-4 shadow-sm" onclick="window.print()">PRINT OFFICIAL FORM</button>
         </div>
 
         <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius:12px; background: #f8fafc;">
             <div class="card-body p-4">
-                <h6 class="fw-bold text-dark mb-3 text-uppercase smallest" style="letter-spacing:1px;">Logistics Assignment</h6>
+                <h6 class="fw-bold text-dark mb-3 text-uppercase smallest">Logistics Assignment</h6>
                 <div class="row g-3">
                     <div class="col-md-3">
                         <label class="smallest fw-800 text-muted text-uppercase">Transporter Name</label>
-                        <input type="text" class="form-control form-control-sm border-0 shadow-sm" id="in_driverName" placeholder="e.g. Pirlo Trucking" oninput="syncPrintDetail('print_transporter', this.value)">
+                        <input type="text" class="form-control form-control-sm" id="in_driverName" oninput="syncPrintDetail('print_transporter', this.value)">
                     </div>
                     <div class="col-md-2">
                         <label class="smallest fw-800 text-muted text-uppercase">Reg No</label>
-                        <input type="text" class="form-control form-control-sm border-0 shadow-sm" id="in_regNo" placeholder="NP 123..." oninput="syncPrintDetail('print_regNo', this.value)">
+                        <input type="text" class="form-control form-control-sm" id="in_regNo" oninput="syncPrintDetail('print_regNo', this.value)">
                     </div>
                     <div class="col-md-2">
                         <label class="smallest fw-800 text-muted text-uppercase">Trailer No</label>
-                        <input type="text" class="form-control form-control-sm border-0 shadow-sm" id="in_trailerNo" placeholder="TRL..." oninput="syncPrintDetail('print_trailerNo', this.value)">
+                        <input type="text" class="form-control form-control-sm" id="in_trailerNo" oninput="syncPrintDetail('print_trailerNo', this.value)">
                     </div>
                     <div class="col-md-3">
                         <label class="smallest fw-800 text-muted text-uppercase">Dispatch Date</label>
-                        <input type="date" class="form-control form-control-sm border-0 shadow-sm" id="in_date" value="${new Date().toISOString().split('T')[0]}" oninput="syncPrintDetail('print_date', this.value)">
+                        <input type="date" class="form-control form-control-sm" id="in_date" value="${new Date().toISOString().split('T')[0]}" oninput="syncPrintDetail('print_date', this.value)">
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="manifest-print-wrapper bg-white shadow-sm p-5 border rounded" id="printableArea">
-            <div class="d-flex justify-content-between align-items-start mb-4">
-                <div style="width: 200px;">
-                    <img src="path-to-your-logo.png" alt="Company Logo" style="max-width: 100%; height: auto;">
-                </div>
-                <div class="text-end" style="font-size: 0.85rem; line-height: 1.4;">
-                    <h4 class="fw-black mb-1 text-dark">V&V LOGISTICS</h4>
-                    <p class="mb-0">123 Logistics Drive, Industrial Park</p>
-                    <p class="mb-0">Tel: +27 11 000 0000</p>
-                    <p class="mb-0">Email: dispatch@vvlogistics.co.za</p>
-                    <p class="fw-bold mt-2 text-primary">MANIFEST: ${window.activeManifestID}</p>
-                </div>
-            </div>
-
-            <div class="mb-4 pt-2">
-                <h5 class="fw-bold" style="font-size: 1.1rem;">Transporter Name: 
-                    <span id="print_transporter" class="ms-2 border-bottom border-dark d-inline-block fw-bold" style="min-width: 400px; padding-left: 10px;">___________________________</span>
-                </h5>
-            </div>
-
-            <table class="table table-bordered align-middle border-dark border-1 mb-4">
-                <thead class="table-light border-dark">
-                    <tr style="font-size: 0.75rem;" class="text-uppercase fw-bold">
-                        <th class="py-2">BRN CODE</th>
-                        <th class="py-2">ORDER #</th>
-                        <th class="py-2">CUSTOMER (AREA)</th>
-                        <th class="py-2">BRANCH NAME</th>
-                        <th class="py-2">ITEM DESCRIPTION</th>
-                        <th class="text-center py-2">QTY</th>
-                        <th class="py-2">LS #</th>
-                    </tr>
-                </thead>
-                <tbody style="font-size: 0.85rem;">
-                    ${items.map(item => {
-                        const desc = item.Description || item.description || (typeof _getDescription === 'function' ? _getDescription(item) : '---');
-                        return `
-                        <tr>
-                            <td>${item['Brn No'] || item['Branch No'] || '---'}</td>
-                            <td>${item['Ord No'] || item['Order No'] || '---'}</td>
-                            <td class="fw-bold text-dark">${item.Area || '---'}</td>
-                            <td>${item['Branch Name'] || '---'}</td>
-                            <td style="max-width: 250px;">${desc}</td>
-                            <td class="text-center fw-bold text-dark">${item.Final_Loaded ?? item.staged_qty}</td>
-                            <td class="text-muted small">${item.TripID}</td>
-                        </tr>`;
-                    }).join('')}
-                </tbody>
-                <tfoot class="border-dark">
-                    <tr class="fw-bold bg-light">
-                        <td colspan="5" class="text-end text-uppercase py-2" style="font-size:0.75rem;">Total Payload Volume:</td>
-                        <td class="text-center py-2" style="font-size:1.1rem;">${totalLoaded}</td>
-                        <td></td>
-                    </tr>
-                </tfoot>
-            </table>
-
-            <div class="mt-5" style="font-size: 0.9rem;">
-                <p class="fst-italic mb-5" style="line-height: 1.6;">"By signing this document, I acknowledge that i have checked and verified all that was loaded on my vehicle. I also take full responsibility for any loss or damages that may occur as a result of negligence"</p>
-                
-                <div class="row g-5">
-                    <div class="col-6">
-                        <div class="d-flex mb-4 align-items-end">
-                            <span class="fw-bold me-2">Name:</span>
-                            <div class="border-bottom border-dark flex-grow-1" style="height: 25px;"></div>
-                        </div>
-                        <div class="d-flex align-items-end">
-                            <span class="fw-bold me-2">Sign:</span>
-                            <div class="border-bottom border-dark flex-grow-1" style="height: 25px;"></div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="d-flex mb-4 align-items-end">
-                            <span class="fw-bold me-2">REG No:</span>
-                            <div id="print_regNo" class="border-bottom border-dark flex-grow-1 fw-bold ps-2" style="height: 25px;"></div>
-                        </div>
-                        <div class="d-flex align-items-end">
-                            <span class="fw-bold me-2">Trailer No:</span>
-                            <div id="print_trailerNo" class="border-bottom border-dark flex-grow-1 fw-bold ps-2" style="height: 25px;"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="mt-5 d-flex align-items-end">
-                    <span class="fw-bold me-2">Date:</span>
-                    <div id="print_date" class="border-bottom border-dark fw-bold ps-2" style="min-width: 250px; height: 25px;">${new Date().toLocaleDateString()}</div>
                 </div>
             </div>
         </div>
 
         ${currentStatus === 'MANIFESTED' ? `
-            <div class="mt-4 p-4 bg-white rounded border shadow-sm d-flex justify-content-between align-items-center no-print">
+            <div class="alert alert-warning d-flex align-items-center no-print border-0 shadow-sm mb-3">
+                <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
                 <div>
-                    <h6 class="fw-bold mb-1 text-dark">Ready for Departure?</h6>
-                    <p class="small text-muted mb-0">Ship & Dispatch will finalize this manifest and move it to history.</p>
+                    <strong class="text-uppercase">Action Required:</strong> 
+                    Please enter the <span class="badge bg-dark">INVOICE #</span> for each item in the table below before printing or dispatching.
                 </div>
-                <button class="btn btn-success fw-bold px-5 py-2 shadow-sm" onclick="finalizeDispatchToHistory('${window.activeManifestID}')">
-                    <i class="bi bi-truck me-2"></i> SHIP & DISPATCH
-                </button>
+            </div>
+        ` : ''}
+
+        <div class="manifest-print-wrapper bg-white shadow-sm p-5 border rounded" id="printableArea">
+            <div class="d-flex justify-content-between align-items-start mb-4">
+                <div><h4 class="fw-black mb-1">V&V LOGISTICS</h4><p class="mb-0 small text-muted">Official Manifest</p></div>
+                <div class="text-end fw-bold text-primary">MANIFEST: ${window.activeManifestID}</div>
+            </div>
+
+            <div class="mb-4">
+                <h5 class="fw-bold">Transporter Name: <span id="print_transporter" class="ms-2 border-bottom border-dark d-inline-block" style="min-width: 300px;">________________</span></h5>
+            </div>
+
+            <table class="table table-bordered align-middle mb-4">
+                <thead class="table-light">
+                    <tr class="text-uppercase fw-bold small">
+                        <th>BRN CODE</th>
+                        <th>ORDER #</th>
+                        <th>CUSTOMER (AREA)</th>
+                        <th>BRANCH NAME</th>
+                        <th class="text-center">QTY</th>
+                        <th>INVOICE #</th>
+                    </tr>
+                </thead>
+                <tbody class="small">
+                    ${items.map(item => `
+                        <tr>
+                            <td style="border: 1px solid #000 !important;">${item['Brn No'] || item['Branch No'] || '---'}</td>
+                            <td style="border: 1px solid #000 !important;">${item['Ord No'] || item['Order No'] || '---'}</td>
+                            <td class="fw-bold text-dark" style="border: 1px solid #000 !important;">${item.Area || '---'}</td>
+                            <td style="border: 1px solid #000 !important;">${item['Branch Name'] || '---'}</td>
+                            <td class="text-center fw-bold" style="border: 1px solid #000 !important;">${item.Final_Loaded ?? item.staged_qty}</td>
+                            <td class="p-0 col-invoice" style="width: 150px; min-width: 150px; border: 1px solid #000 !important;">
+                                <input type="text" 
+                                    id="manifest_inv_${item.fingerprint}" 
+                                    class="manifest-inv-input ${!item.Invoice_No ? 'highlight-required' : ''}" 
+                                    placeholder="REQUIRED #" 
+                                    value="${item.Invoice_No || ''}"
+                                    ${currentStatus === 'DISPATCHED' ? 'disabled' : ''}
+                                    oninput="window.saveManifestInvoice('${item.fingerprint}')">
+                            </td>
+                        </tr>`).join('')}
+                </tbody>
+                <tfoot>
+                    <tr class="fw-bold bg-light">
+                        <td colspan="4" class="text-end py-2" style="border: 1px solid #000 !important;">Total Payload Volume:</td>
+                        <td class="text-center py-2" style="border: 1px solid #000 !important;">${totalLoaded}</td>
+                        <td style="border: 1px solid #000 !important;"></td>
+                    </tr>
+                </tfoot>
+            </table>
+
+            <div class="mt-5">
+                <p class="fst-italic mb-5 small">"By signing this document, I acknowledge that i have checked and verified all that was loaded on my vehicle..."</p>
+                <div class="row g-5">
+                    <div class="col-6">
+                        <div class="d-flex mb-4 align-items-end"><span class="fw-bold me-2">Name:</span><div class="border-bottom border-dark flex-grow-1" style="height:25px;"></div></div>
+                        <div class="d-flex align-items-end"><span class="fw-bold me-2">Sign:</span><div class="border-bottom border-dark flex-grow-1" style="height:25px;"></div></div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex mb-4 align-items-end"><span class="fw-bold me-2">REG No:</span><div id="print_regNo" class="border-bottom border-dark flex-grow-1 fw-bold ps-2" style="height:25px;"></div></div>
+                        <div class="d-flex align-items-end"><span class="fw-bold me-2">Trailer No:</span><div id="print_trailerNo" class="border-bottom border-dark flex-grow-1 fw-bold ps-2" style="height:25px;"></div></div>
+                    </div>
+                </div>
+                <div class="mt-5 d-flex align-items-end"><span class="fw-bold me-2">Date:</span><div id="print_date" class="border-bottom border-dark fw-bold ps-2" style="min-width: 200px;">${new Date().toLocaleDateString()}</div></div>
+            </div>
+        </div>
+
+        ${currentStatus === 'MANIFESTED' ? `
+            <div class="mt-4 p-4 bg-white rounded border shadow-sm d-flex justify-content-between align-items-center no-print">
+                <div><h6 class="fw-bold mb-1">Ready for Departure?</h6><p class="small text-muted mb-0">Finalize and move to archive.</p></div>
+                <button class="btn btn-success fw-bold px-5 py-2 shadow-sm" onclick="finalizeDispatchToHistory('${window.activeManifestID}')">SHIP & DISPATCH</button>
             </div>
         ` : ''}
     `;
@@ -241,6 +231,12 @@ window.finalizeDispatchToHistory = (tripID) => {
     const tripItems = masterOrders.filter(o => o.TripID === tripID);
     if (tripItems.length === 0) return alert("Error: Trip data not found.");
 
+    // --- NEW INVOICE GUARD ---
+    const missingInvoices = tripItems.filter(i => !i.Invoice_No || i.Invoice_No.trim() === "");
+    if (missingInvoices.length > 0) {
+        return alert(`STOP: There are ${missingInvoices.length} items missing Invoice Numbers. Please enter them in the table before dispatching.`);
+    }
+
     if (!confirm(`Confirm Departure for ${tripID}?`)) return;
 
     const totalLoaded = tripItems.reduce((sum, o) => sum + (o.Final_Loaded || 0), 0);
@@ -260,6 +256,8 @@ window.finalizeDispatchToHistory = (tripID) => {
             Area: o.Area,
             loaded: o.Final_Loaded || 0,
             planned: o.staged_qty || 0,
+            // Capture the Invoice No for history
+            invoiceNo: o.Invoice_No || 'N/A', 
             description: (typeof _getDescription === 'function' ? _getDescription(o) : (o.Description || o.description || '---')),
             Note: o.Note || ''
         }))
@@ -272,21 +270,28 @@ window.finalizeDispatchToHistory = (tripID) => {
     masterOrders.forEach(item => {
         if (item.TripID === tripID) {
             if ((item.BounceBackQty || 0) > 0) {
+                // Return shorts to pool
                 item.qty = (item.qty || 0) + item.BounceBackQty;
-                item.staged_qty = item.Final_Loaded;
+                item.staged_qty = 0; // Reset staged since it's going back to warehouse
                 item.Status = 'Pending';
                 item.TripID = null;
+                // Note: We keep the Invoice_No on the dispatched part, but the pending part is clean
             } else {
                 item.Status = 'DISPATCHED'; 
             }
+            // Cleanup temporary verification fields
             delete item.Final_Loaded;
             delete item.BounceBackQty;
         }
     });
 
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
+    
     alert(`Trip ${tripID} dispatched to Archive.`);
+    
+    // Refresh UI
     window.activeManifestID = null;
+    renderManifestTable(); // Refresh the ribbon
     showSection('mainMenu');
 };
 
@@ -297,4 +302,16 @@ window.reopenManifest = (tripID) => {
     localStorage.setItem('masterOrders', JSON.stringify(masterOrders));
     window.selectedTrip = tripID;
     showSection('dispatchPane');
+};
+
+window.saveManifestInvoice = (fingerprint) => {
+    const orders = JSON.parse(localStorage.getItem('masterOrders')) || [];
+    const item = orders.find(o => o.fingerprint === fingerprint);
+    
+    if (item) {
+        const input = document.getElementById(`manifest_inv_${fingerprint}`);
+        // Save the value and force Uppercase for a professional look
+        item.Invoice_No = input.value.trim().toUpperCase();
+        localStorage.setItem('masterOrders', JSON.stringify(orders));
+    }
 };
